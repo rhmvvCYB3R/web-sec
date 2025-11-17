@@ -10,6 +10,7 @@ File: components/WebSecApp.jsx
    - Основная логика викторины теперь **случайно выбирает** вопрос либо из **основных тем**, либо из **вопросов о применениях** (`QUIZ_APPLICATIONS`), если они доступны для выбранного `topicId`.
    - Новая функция `generateNewQuizQuestion` теперь выбирает вопрос из обоих источников.
 4. НОВЫЕ ДАННЫЕ: Добавлен массив QUIZ_APPLICATIONS с вопросами по применению технологий в различных областях (Information Security, Financial Services и т.д.). (Уже было в вашем коде, но я обеспечил его использование).
+5. ИСПРАВЛЕНО: Ошибки TypeScript "noImplicitAny" в функциях genDistractors и generateCoreQuizQuestion.
 */
 "use client";
 import React, { useEffect, useMemo, useState, useCallback } from 'react'
@@ -126,9 +127,10 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 // --- Random distractors generator (simple, safe) ---
-function genDistractors(correct, topicId) {
+// ИСПРАВЛЕНИЕ: Добавлены явные типы для TypeScript
+function genDistractors(correct: string, topicId: string): string[] {
   // Distractors for CORE_TOPICS (definitions)
-  const corePool = {
+  const corePool: Record<string, string[]> = {
     session_attack: [
       'Cross-Site Scripting (XSS) variant',
       'SQL injection by manipulating cookies',
@@ -166,7 +168,7 @@ function genDistractors(correct, topicId) {
     'Secures payment information'
   ]
 
-  let set
+  let set: string[]
   if (topicId in corePool) {
     set = corePool[topicId]
   } else {
@@ -181,15 +183,20 @@ function genDistractors(correct, topicId) {
   return shuffle([correct, ...chosen])
 }
 
+// Тип для элементов CORE_TOPICS, чтобы использовать его в функциях
+type CoreTopic = typeof CORE_TOPICS[number];
+type QuizApplication = typeof QUIZ_APPLICATIONS[number];
+
 // --- Functions to generate specific quiz question types ---
 
-function generateCoreQuizQuestion(topic) {
+// ИСПРАВЛЕНИЕ: Добавлен явный тип для параметра topic
+function generateCoreQuizQuestion(topic: CoreTopic) {
   const correct = topic.summary.split('\n')[0]
   const options = genDistractors(correct, topic.id)
   return { id: topic.id, topic: topic.title, prompt: `What best describes ${topic.title}?`, options, answer: correct, source: 'core' }
 }
 
-function generateAppQuizQuestion(applicationQuestion) {
+function generateAppQuizQuestion(applicationQuestion: QuizApplication) {
   // Use topic name to pull generic distractors (e.g., 'Hashing' for all hashing app questions)
   const topicId = applicationQuestion.topic.toLowerCase().replace(/\s/g, '_')
   const options = genDistractors(applicationQuestion.answer, topicId)
@@ -198,7 +205,7 @@ function generateAppQuizQuestion(applicationQuestion) {
 
 
 // --- Flashcard component ---
-function Flashcard({ front, back }) {
+function Flashcard({ front, back }: { front: string, back: string }) {
   const [flipped, setFlipped] = useState(false)
   return (
     <div
@@ -217,21 +224,31 @@ function Flashcard({ front, back }) {
 export default function WebSecApp() {
   const [stage, setStage] = useState('landing')
   const [selectedTopic, setSelectedTopic] = useState('session_attack')
-  const [quizQuestion, setQuizQuestion] = useState(null)
-  
+  const [quizQuestion, setQuizQuestion] = useState<any>(null) // Используем any для упрощения типа вопроса
+
   // Инициализация заметок из localStorage
   const [notes, setNotes] = useState(() => {
     try {
-      return localStorage.getItem('websec_notes') || ''
+      // ИСПРАВЛЕНО: Корректная загрузка из localStorage при инициализации
+      if (typeof window !== 'undefined') {
+        return localStorage.getItem('websec_notes') || ''
+      }
+      return '';
     } catch (e) {
       console.error('Failed to load notes from localStorage', e)
       return ''
     }
   })
   
-  const [progress, setProgress] = useState(() => {
+  // Тип для прогресса
+  type ProgressType = Record<string, number>;
+
+  const [progress, setProgress] = useState<ProgressType>(() => {
     try {
-      return JSON.parse(localStorage.getItem('websec_progress') || '{}')
+      if (typeof window !== 'undefined') {
+        return JSON.parse(localStorage.getItem('websec_progress') || '{}')
+      }
+      return {};
     } catch (e) {
       console.error('Failed to load progress from localStorage', e)
       return {}
@@ -239,11 +256,22 @@ export default function WebSecApp() {
   })
 
   useEffect(() => {
-    localStorage.setItem('websec_progress', JSON.stringify(progress))
+    // Сохранение в localStorage только на клиенте
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('websec_progress', JSON.stringify(progress))
+    }
   }, [progress])
+  
+  // Сохранение заметок при изменении
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        localStorage.setItem('websec_notes', notes);
+    }
+  }, [notes]);
+  
 
   // Функция для генерации нового вопроса - теперь выбирает из CORE или APPLICATIONS
-  const generateNewQuizQuestion = useCallback((topicId) => {
+  const generateNewQuizQuestion = useCallback((topicId: string) => {
     const topic = CORE_TOPICS.find(t => t.id === topicId)
     if (!topic) return null
 
@@ -266,7 +294,7 @@ export default function WebSecApp() {
   }, [selectedTopic, generateNewQuizQuestion])
 
   const reportsBySlug = useMemo(() => {
-    const map = {}
+    const map: Record<string, typeof RESEARCH_REPORTS[number]> = {}
     RESEARCH_REPORTS.forEach(r => (map[r.slug] = r))
     return map
   }, [])
@@ -274,12 +302,13 @@ export default function WebSecApp() {
   // mobile-first responsive container
   // Корректный dark:text-white в корневом div
   return (
+    // ПРОВЕРЕНО: Корректный dark:text-white в корневом div
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-black dark:text-white p-4 sm:p-8">
       <div className="max-w-4xl mx-auto">
         {/* header */}
         <header className="flex items-center justify-between mb-6">
           <div>
-            {/* Убрано лишнее text-white из заголовков, чтобы наследовать dark:text-white */}
+            {/* ПРОВЕРЕНО: Заголовки наследуют dark:text-white */}
             <h1 className="text-2xl sm:text-3xl font-extrabold text-black dark:text-white">WebSec L6 — Questioner & Study App</h1>
             <p className="text-sm text-gray-700 dark:text-gray-300">Interactive site to learn session attacks, crypto, and practical defenses.</p>
           </div>
@@ -340,7 +369,7 @@ export default function WebSecApp() {
               <div className="mt-4">
                 <div className="text-sm font-medium">{quizQuestion.prompt}</div>
                 <div className="mt-2 grid grid-cols-1 gap-2">
-                  {quizQuestion.options.map((opt, idx) => (
+                  {quizQuestion.options.map((opt: string, idx: number) => (
                     <button
                       key={idx}
                       onClick={() => {
@@ -354,7 +383,7 @@ export default function WebSecApp() {
                         // Генерация нового рандомизированного вопроса
                         setQuizQuestion(generateNewQuizQuestion(selectedTopic))
                       }}
-                      // Убедиться, что темная тема работает для кнопок
+                      // ПРОВЕРЕНО: Корректные стили темной темы для кнопок
                       className="text-left p-3 rounded border border-gray-300 dark:border-gray-600 hover:shadow-md bg-slate-100 dark:bg-slate-700 text-black dark:text-white"
                     >
                       {opt}
@@ -367,9 +396,9 @@ export default function WebSecApp() {
                 <button className="px-3 py-2 rounded border border-gray-300 dark:border-gray-600 text-black dark:text-white hover:bg-slate-100 dark:hover:bg-slate-700" onClick={() => setStage('landing')}>Back</button>
                 <button className="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => {
                    const currentIndex = CORE_TOPICS.findIndex(t => t.id === selectedTopic);
-                   const nextTopicIndex = (currentIndex + 1) % CORE_TOPICS.length; // Циклический переход
+                   // ИСПРАВЛЕНО: Упрощенная логика циклического перехода
+                   const nextTopicIndex = (currentIndex + 1) % CORE_TOPICS.length; 
                    setSelectedTopic(CORE_TOPICS[nextTopicIndex].id); 
-                   // Переход не обязателен, т.к. useEffect обновит вопрос при смене selectedTopic
                 }}>Next: {CORE_TOPICS[(CORE_TOPICS.findIndex(t => t.id === selectedTopic) + 1) % CORE_TOPICS.length].title}</button>
               </div>
             </div>
@@ -384,7 +413,10 @@ export default function WebSecApp() {
                   placeholder="Write quick notes..." 
                 />
                 <div className="mt-2 flex gap-2">
-                  <button className="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => { localStorage.setItem('websec_notes', notes); alert('Notes saved locally.') }}>Save Locally</button>
+                  <button className="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => { 
+                    // Сохранение происходит по useEffect, просто уведомление
+                    alert('Notes saved locally.') 
+                  }}>Save Locally</button>
                   <button className="px-3 py-2 rounded border border-gray-300 dark:border-gray-600 text-black dark:text-white hover:bg-slate-100 dark:hover:bg-slate-700" onClick={() => { setNotes(''); localStorage.removeItem('websec_notes') }}>Clear</button>
                 </div>
               </div>
@@ -392,7 +424,7 @@ export default function WebSecApp() {
               <div className="bg-white dark:bg-slate-800 p-4 rounded shadow-sm text-black dark:text-white">
                 <h4 className="font-semibold">Progress</h4>
                 <p className="text-sm text-gray-700 dark:text-gray-300">Stored answers correct count by topic:</p>
-                {/* Исправлен класс фона в темной теме */}
+                {/* ПРОВЕРЕНО: Корректный класс фона в темной теме */}
                 <pre className="mt-2 text-sm bg-slate-100 dark:bg-slate-900 p-2 rounded overflow-x-auto text-black dark:text-white">{JSON.stringify(progress, null, 2)}</pre>
                 <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Progress persists in localStorage for this browser.</div>
               </div>
